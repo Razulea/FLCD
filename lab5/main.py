@@ -1,11 +1,14 @@
 from tabulate import tabulate
 
-
 # input definition
 # first line the initial nonTerminal
 # second line the terminals with spaces between elements
 # third line the nonTerminals
 # next lines the productions
+ERROR = "ERROR"
+ACCEPT = "ACCEPT"
+PROCESSING = "PROCESSING"
+
 
 class Lr0Parser:
     """
@@ -153,7 +156,7 @@ class Lr0Parser:
                 self.actions_and_goto_by_state_id[parent["parent_index"]][parent["before_dot"]] = key
             else:
                 self.actions_and_goto_by_state_id[parent["parent_index"]] = {parent["before_dot"]: key}
-        table = {f"I{index}": self.actions_and_goto_by_state_id[index] for index in range(len(self.states))}
+        table = {f"S{index}": self.actions_and_goto_by_state_id[index] for index in range(len(self.states))}
         self.print_table(table)
 
     """
@@ -311,8 +314,11 @@ class Lr0Parser:
         tab = tabulate(rows, headers, tablefmt="pretty")
         file_tab = tabulate(rows, headers, tablefmt="html")
         print(tab)
-        with open(f"output.html", 'w') as out_file:
-            out_file.write(file_tab)
+        self.write_to_file(file_tab, "canonical_table.html")
+
+    def write_to_file(self, content, name):
+        with open(name, 'w') as out_file:
+            out_file.write(content)
 
     """
     Prints out a specific data of the parser object
@@ -336,6 +342,75 @@ class Lr0Parser:
         else:
             print("Wrong non terminal!")
 
+    """
+    Input and precondition: a string to be parsed
+    Output and postconditions: the parsing table
+    
+    We get the intersection of the first element of the given string, which we delete from it if it isn't $, 
+    and the last element of the working stack in our cannonical collection table. If the intersection is a shift,
+    we add to the working stack the character and the intersection number. If the intersection is a reduce, we check 
+    what the production with that number is. We replace from the working stack the right side of that production with 
+    the left side of it, then add the goto of that nonterminat and the integer behind it. We continue the process until
+    we reach accept.
+    """
+
+    def parse_string(self, s):
+        self.canonical_collection()
+        print(s)
+        string = s + "$"
+        queue = [c for c in string]
+        working_stack = ["$", 0]
+        output_band = []
+        status = PROCESSING  # or ACCEPT or ERROR
+        rows = [[self.list_to_string(working_stack), self.list_to_string(queue),
+                        self.list_to_string(output_band, ",")]]
+        while status == PROCESSING:
+            pop = queue.pop(0) if queue[0] != "$" else "$"
+
+            last_working_stack_element = working_stack[-1]
+            intersection = self.actions_and_goto_by_state_id[last_working_stack_element][pop]
+            if intersection == "accept":
+                status = ACCEPT
+                break
+            if type(intersection) == int:
+                # this means that the intersection is a shift
+                working_stack.append(pop)
+                working_stack.append(intersection)
+            else:
+                # this means that the intersection is a reduce
+                production_index = int(intersection.replace("r", ""))
+                output_band.insert(0, production_index)
+                reduce_transition = self.transactions[production_index - 1]
+                non_terminal = reduce_transition[0]
+                replaceable_string = reduce_transition[1:]
+                working_stack_length = len(working_stack)
+                replaceable_string_length = len(replaceable_string)
+                without_final_partition = working_stack[:working_stack_length - (2 * replaceable_string_length)]
+                working_stack = without_final_partition
+                state_index = working_stack[-1]
+                working_stack.append(non_terminal)
+                goto = self.actions_and_goto_by_state_id[state_index][non_terminal]
+                working_stack.append(goto)
+            rows.append([self.list_to_string(working_stack), self.list_to_string(queue),
+                        self.list_to_string(output_band, ",")])
+        if status == ACCEPT:
+            print(output_band)
+            rows.append(["accepted", self.list_to_string(queue),
+                         self.list_to_string(output_band, ",")])
+            print("Accepted")
+            headers = ["Work stack", "Input stack", "Output band"]
+            print(tabulate(rows, headers, tablefmt="pretty"))
+            file_tab = tabulate(rows, headers, tablefmt="html")
+            self.write_to_file(file_tab, "parsed_table.html")
+        if status == ERROR:
+            print("Error in string")
+
+    @staticmethod
+    def list_to_string(l, joiner = ""):
+        if len(l) == 0:
+            return "empty"
+        return joiner.join([str(element) for element in l])
+
 
 def show_menu():
     lr0 = Lr0Parser("g0.txt")
@@ -346,7 +421,8 @@ def show_menu():
     3 - print productions
     4 - print productions for a given non terminal
     5 - canonical collection
-    6 - exit
+    6 - parse string
+    7 - exit
     """)
     menu = {
         "1": lambda: lr0.print_data(1),
@@ -354,7 +430,8 @@ def show_menu():
         "3": lambda: lr0.print_data(3),
         "4": lambda: lr0.print_production(input("Please give a non terminal:")),
         "5": lambda: lr0.canonical_collection(),
-        "6": exit
+        "6": lambda: lr0.parse_string(input("Please give a string:")),
+        "7": exit
     }
     while True:
         option = input("Choose an option:")
